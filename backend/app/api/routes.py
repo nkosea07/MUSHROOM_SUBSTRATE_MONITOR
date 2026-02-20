@@ -7,9 +7,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings as app_settings
 from app.core.database import get_db
 from app.crud import actuator_crud, alert_crud, sensor_crud
 from app.models.control_state import ControlState
+from app.models.runtime_mode import RuntimeMode
 from app.models.sensor_data import SensorData
 from app.models.system_settings import SystemSettings
 from app.schemas import (
@@ -49,6 +51,22 @@ def _serialize_control_state(row: ControlState) -> dict[str, Any]:
         "humidifier": row.humidifier,
         "ph_actuator": row.ph_actuator,
         "updated_at": row.updated_at,
+    }
+
+
+def _normalize_runtime_mode(mode: str) -> str:
+    normalized = mode.strip().lower()
+    if normalized not in {"live", "mock"}:
+        raise HTTPException(status_code=400, detail="mode must be either 'live' or 'mock'")
+    return normalized
+
+
+def _serialize_runtime_mode(row: RuntimeMode) -> dict[str, Any]:
+    return {
+        "mode": row.mode,
+        "updated_at": row.updated_at,
+        "esp32_base_url": app_settings.esp32_base_url,
+        "allow_live_fallback": app_settings.allow_live_fallback,
     }
 
 
@@ -92,6 +110,21 @@ def _get_or_create_control_state(db: Session) -> ControlState:
     return state
 
 
+def _get_or_create_runtime_mode(db: Session) -> RuntimeMode:
+    runtime_mode = db.get(RuntimeMode, 1)
+    if runtime_mode:
+        return runtime_mode
+
+    default_mode = str(app_settings.runtime_mode_default).strip().lower()
+    if default_mode not in {"live", "mock"}:
+        default_mode = "live"
+    runtime_mode = RuntimeMode(id=1, mode=default_mode)
+    db.add(runtime_mode)
+    db.commit()
+    db.refresh(runtime_mode)
+    return runtime_mode
+
+
 def _normalize_sensor_payload(raw_payload: dict[str, Any], settings: SystemSettings) -> dict[str, Any]:
     thresholds = raw_payload.get("thresholds") or _serialize_thresholds(settings)
     return {
@@ -115,6 +148,33 @@ def _create_alerts_for_payload(db: Session, raw_payload: dict[str, Any]) -> list
         alert = alert_crud.create(db, alert_payload)
         created.append(AlertOut.model_validate(alert))
     return created
+
+
+def _save_sensor_payload(db: Session, raw_payload: dict[str, Any], settings: SystemSettings) -> SensorOut:
+    if "thresholds" not in raw_payload:
+        raw_payload["thresholds"] = _serialize_thresholds(settings)
+    sensor_obj = sensor_crud.create(db, _normalize_sensor_payload(raw_payload, settings))
+    _create_alerts_for_payload(db, raw_payload)
+    return SensorOut.model_validate(sensor_obj)
+
+
+def _build_simulated_payload(settings: SystemSettings, baseline: SensorData | None) -> dict[str, Any]:
+    temp_mid = (settings.temp_min + settings.temp_max) / 2
+    moisture_mid = (settings.moisture_min + settings.moisture_max) / 2
+    ph_mid = (settings.ph_min + settings.ph_max) / 2
+
+    temperature = baseline.temperature if baseline else temp_mid
+    moisture = float(baseline.moisture) if baseline else moisture_mid
+    ph_value = baseline.ph if baseline and baseline.ph is not None else ph_mid
+
+    return {
+        "temperature": round(_clamp(temperature + random.uniform(-0.5, 0.5), 0.0, 50.0), 2),
+        "moisture": int(round(_clamp(moisture + random.uniform(-2.5, 2.5), 0.0, 100.0))),
+        "ph": round(_clamp(ph_value + random.uniform(-0.08, 0.08), 0.0, 14.0), 2),
+        "device_id": "simulated-esp32",
+        "location": "simulation",
+        "thresholds": _serialize_thresholds(settings),
+    }
 
 
 def _build_control_payload(command: ControlCommand) -> dict[str, Any]:
@@ -156,6 +216,24 @@ def _update_control_state(db: Session, outgoing: dict[str, Any]) -> ControlState
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/runtime/mode")
+def get_runtime_mode(db: Session = Depends(get_db)) -> dict[str, Any]:
+    runtime_mode = _get_or_create_runtime_mode(db)
+    return _serialize_runtime_mode(runtime_mode)
+
+
+@router.put("/runtime/mode")
+def update_runtime_mode(payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)) -> dict[str, Any]:
+    if "mode" not in payload:
+        raise HTTPException(status_code=400, detail="mode is required")
+
+    runtime_mode = _get_or_create_runtime_mode(db)
+    runtime_mode.mode = _normalize_runtime_mode(str(payload["mode"]))
+    db.commit()
+    db.refresh(runtime_mode)
+    return _serialize_runtime_mode(runtime_mode)
 
 
 @router.get("/settings/targets")
@@ -206,58 +284,61 @@ def get_control_state(db: Session = Depends(get_db)) -> dict[str, Any]:
 def ingest_sensor_data(payload: SensorIn, db: Session = Depends(get_db)) -> SensorOut:
     settings = _get_or_create_settings(db)
     raw_payload = payload.model_dump(exclude_none=True)
-
-    if "thresholds" not in raw_payload:
-        raw_payload["thresholds"] = _serialize_thresholds(settings)
-
-    sensor_obj = sensor_crud.create(db, _normalize_sensor_payload(raw_payload, settings))
-    _create_alerts_for_payload(db, raw_payload)
-    return SensorOut.model_validate(sensor_obj)
+    return _save_sensor_payload(db, raw_payload, settings)
 
 
 @router.post("/sensor/sync", response_model=SensorOut)
 def sync_sensor_data(db: Session = Depends(get_db)) -> SensorOut:
     settings = _get_or_create_settings(db)
+    runtime_mode = _get_or_create_runtime_mode(db)
+
+    if runtime_mode.mode != "live":
+        raise HTTPException(
+            status_code=409,
+            detail="Live sync is disabled while runtime mode is 'mock'. Switch to 'live' first.",
+        )
 
     try:
         raw_payload = esp32_client.fetch_current_data()
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch ESP32 data: {exc}") from exc
 
-    if "thresholds" not in raw_payload:
-        raw_payload["thresholds"] = _serialize_thresholds(settings)
-
-    sensor_obj = sensor_crud.create(db, _normalize_sensor_payload(raw_payload, settings))
-    _create_alerts_for_payload(db, raw_payload)
-    return SensorOut.model_validate(sensor_obj)
+    return _save_sensor_payload(db, raw_payload, settings)
 
 
 @router.post("/sensor/simulate", response_model=SensorOut)
 def simulate_sensor_data(db: Session = Depends(get_db)) -> SensorOut:
     settings = _get_or_create_settings(db)
+    runtime_mode = _get_or_create_runtime_mode(db)
+
+    if runtime_mode.mode != "mock":
+        raise HTTPException(
+            status_code=409,
+            detail="Mock simulation is disabled while runtime mode is 'live'. Switch to 'mock' first.",
+        )
+
     latest = sensor_crud.get_multi(db, limit=1)
     baseline = latest[0] if latest else None
+    simulated = _build_simulated_payload(settings, baseline)
+    return _save_sensor_payload(db, simulated, settings)
 
-    temp_mid = (settings.temp_min + settings.temp_max) / 2
-    moisture_mid = (settings.moisture_min + settings.moisture_max) / 2
-    ph_mid = (settings.ph_min + settings.ph_max) / 2
 
-    temperature = baseline.temperature if baseline else temp_mid
-    moisture = float(baseline.moisture) if baseline else moisture_mid
-    ph_value = baseline.ph if baseline and baseline.ph is not None else ph_mid
+@router.post("/sensor/collect", response_model=SensorOut)
+def collect_sensor_data(db: Session = Depends(get_db)) -> SensorOut:
+    settings = _get_or_create_settings(db)
+    runtime_mode = _get_or_create_runtime_mode(db)
 
-    simulated = {
-        "temperature": round(_clamp(temperature + random.uniform(-0.5, 0.5), 0.0, 50.0), 2),
-        "moisture": int(round(_clamp(moisture + random.uniform(-2.5, 2.5), 0.0, 100.0))),
-        "ph": round(_clamp(ph_value + random.uniform(-0.08, 0.08), 0.0, 14.0), 2),
-        "device_id": "simulated-esp32",
-        "location": "simulation",
-        "thresholds": _serialize_thresholds(settings),
-    }
+    if runtime_mode.mode == "live":
+        try:
+            raw_payload = esp32_client.fetch_current_data()
+        except requests.RequestException as exc:
+            raise HTTPException(status_code=502, detail=f"Failed to fetch ESP32 data: {exc}") from exc
+        return _save_sensor_payload(db, raw_payload, settings)
 
-    sensor_obj = sensor_crud.create(db, _normalize_sensor_payload(simulated, settings))
-    _create_alerts_for_payload(db, simulated)
-    return SensorOut.model_validate(sensor_obj)
+    latest = sensor_crud.get_multi(db, limit=1)
+    baseline = latest[0] if latest else None
+    simulated = _build_simulated_payload(settings, baseline)
+    return _save_sensor_payload(db, simulated, settings)
 
 
 @router.get("/sensor/latest", response_model=SensorOut)
@@ -306,18 +387,29 @@ def resolve_alert(alert_id: int, db: Session = Depends(get_db)) -> AlertOut:
 @router.post("/control", response_model=ControlResponse)
 def send_control_command(command: ControlCommand, db: Session = Depends(get_db)) -> ControlResponse:
     outgoing = _build_control_payload(command)
+    runtime_mode = _get_or_create_runtime_mode(db)
+    outgoing_for_esp32 = dict(outgoing)
     response_payload: dict[str, Any] = {}
     forwarded = False
-    warning = None
+    warnings: list[str] = []
+    effective_mock = runtime_mode.mode == "mock" or command.simulate
 
-    if not command.simulate:
-        try:
-            response_payload = esp32_client.send_control(outgoing)
-            forwarded = True
-        except requests.RequestException as exc:
-            warning = f"ESP32 unavailable, applied locally only: {exc}"
+    if not effective_mock and "ph_actuator" in outgoing_for_esp32:
+        outgoing_for_esp32.pop("ph_actuator")
+        warnings.append("ph_actuator is not implemented in current ESP32 firmware; applied locally only.")
+
+    if effective_mock:
+        warnings.append("Command applied in mock mode only.")
     else:
-        warning = "Simulated control mode enabled."
+        if outgoing_for_esp32:
+            try:
+                response_payload = esp32_client.send_control(outgoing_for_esp32)
+                forwarded = True
+            except requests.RequestException as exc:
+                if app_settings.allow_live_fallback:
+                    warnings.append(f"ESP32 unavailable, applied locally only: {exc}")
+                else:
+                    raise HTTPException(status_code=502, detail=f"Failed to send command to ESP32: {exc}") from exc
 
     state = _update_control_state(db, outgoing)
 
@@ -341,14 +433,17 @@ def send_control_command(command: ControlCommand, db: Session = Depends(get_db))
         )
 
     payload = {
+        "runtime_mode": runtime_mode.mode,
+        "effective_mock_mode": effective_mock,
+        "forwarded_payload": outgoing_for_esp32,
         "forwarded_to_esp32": forwarded,
         "esp32_response": response_payload,
-        "warning": warning,
+        "warning": " | ".join(warnings) if warnings else None,
         "state": _serialize_control_state(state),
     }
     message = "Control command applied"
-    if warning:
-        message = f"{message} ({warning})"
+    if warnings:
+        message = f"{message} ({' | '.join(warnings)})"
 
     return ControlResponse(success=True, message=message, payload=payload)
 
@@ -361,6 +456,7 @@ def get_monitoring_report(
 ) -> dict[str, Any]:
     settings = _get_or_create_settings(db)
     state = _get_or_create_control_state(db)
+    runtime_mode = _get_or_create_runtime_mode(db)
 
     max_rows = max(points, log_items, 100)
     history_desc = sensor_crud.get_multi(db, limit=max_rows)
@@ -410,6 +506,7 @@ def get_monitoring_report(
 
     return {
         "generated_at": datetime.utcnow(),
+        "runtime_mode": _serialize_runtime_mode(runtime_mode),
         "targets": _serialize_thresholds(settings),
         "control_state": _serialize_control_state(state),
         "current": {
@@ -461,10 +558,12 @@ def get_system_overview(db: Session = Depends(get_db)) -> dict[str, Any]:
     unresolved = alert_crud.get_unresolved_alerts(db)
     recent_actuation = actuator_crud.get_actuator_history(db, limit=10)
     state = _get_or_create_control_state(db)
+    runtime_mode = _get_or_create_runtime_mode(db)
 
     return {
         "latest": SensorOut.model_validate(latest_items[0]).model_dump() if latest_items else None,
         "unresolved_alerts": len(unresolved),
+        "runtime_mode": _serialize_runtime_mode(runtime_mode),
         "control_state": _serialize_control_state(state),
         "recent_actuation": [
             {

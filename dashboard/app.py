@@ -86,6 +86,12 @@ def fmt_value(value: Any, suffix: str = "", digits: int = 1) -> str:
     return f"{value}{suffix}"
 
 
+def refresh_page() -> None:
+    if hasattr(st, "rerun"):
+        st.rerun()
+    st.experimental_rerun()
+
+
 st.markdown(
     """
 <style>
@@ -299,12 +305,46 @@ if state_error:
         "ph_actuator": False,
     }
 
+runtime_mode, runtime_error = api_get(backend_url, "/runtime/mode")
+if runtime_error:
+    runtime_mode = {
+        "mode": "live",
+        "esp32_base_url": "unknown",
+        "allow_live_fallback": False,
+    }
+
 report, report_error = api_get(backend_url, "/monitoring/report?points=20&log_items=10")
 if report_error:
     st.error(f"Monitoring report unavailable: {report_error}")
     st.stop()
 
 with left:
+    current_runtime_mode = str(runtime_mode.get("mode", "live")).lower()
+    st.markdown("### Environment")
+    with st.form("runtime-mode-form"):
+        runtime_choice = st.radio(
+            "Data Source",
+            ["live", "mock"],
+            horizontal=True,
+            index=0 if current_runtime_mode == "live" else 1,
+            format_func=lambda item: item.upper(),
+        )
+        switch_runtime = st.form_submit_button("Switch Environment", use_container_width=True)
+
+    if switch_runtime:
+        updated_runtime, runtime_update_err = api_put(backend_url, "/runtime/mode", {"mode": runtime_choice})
+        if runtime_update_err:
+            st.error(f"Failed to switch runtime mode: {runtime_update_err}")
+        else:
+            runtime_mode = updated_runtime
+            st.success(f"Environment switched to {runtime_choice.upper()}")
+            refresh_page()
+
+    st.caption(
+        f"Current: {str(runtime_mode.get('mode', 'live')).upper()} | "
+        f"ESP32: {runtime_mode.get('esp32_base_url', 'unknown')}"
+    )
+
     st.markdown("### Set Optimal Conditions")
     with st.form("targets-form"):
         temp_range = st.slider(
@@ -349,6 +389,7 @@ with left:
         else:
             settings = updated_targets
             st.success("Optimal conditions updated")
+            refresh_page()
 
     mode_choice = st.radio(
         "System Mode",
@@ -357,11 +398,15 @@ with left:
         index=0 if str(control_state.get("mode", "AUTO")).upper() == "AUTO" else 1,
     )
     if st.button("Apply Mode", use_container_width=True):
-        _, mode_err = api_post(backend_url, "/control", {"mode": mode_choice, "simulate": True})
+        mode_result, mode_err = api_post(backend_url, "/control", {"mode": mode_choice})
         if mode_err:
             st.error(f"Mode update failed: {mode_err}")
         else:
             st.success(f"Mode set to {mode_choice}")
+            mode_warning = ((mode_result or {}).get("payload") or {}).get("warning")
+            if mode_warning:
+                st.warning(mode_warning)
+            refresh_page()
 
     st.markdown("### Actuators")
     with st.form("actuator-form"):
@@ -378,27 +423,34 @@ with left:
             "humidifier": humidifier_toggle,
             "ph_actuator": ph_toggle,
             "fan": fan_toggle,
-            "simulate": True,
         }
-        _, control_err = api_post(backend_url, "/control", command)
+        control_result, control_err = api_post(backend_url, "/control", command)
         if control_err:
             st.error(f"Control failed: {control_err}")
         else:
             st.success("Actuator states updated")
+            control_warning = ((control_result or {}).get("payload") or {}).get("warning")
+            if control_warning:
+                st.warning(control_warning)
+            refresh_page()
 
-    c_sync, c_sim = st.columns(2)
-    with c_sync:
-        if st.button("Sync ESP32", use_container_width=True):
-            _, sync_err = api_post(backend_url, "/sensor/sync")
-            st.error(sync_err) if sync_err else st.success("Synced from ESP32")
-    with c_sim:
-        if st.button("Simulate Reading", use_container_width=True):
-            _, sim_err = api_post(backend_url, "/sensor/simulate")
-            st.error(sim_err) if sim_err else st.success("Simulated reading saved")
+    if st.button("Collect Reading (Current Environment)", use_container_width=True):
+        _, collect_err = api_post(backend_url, "/sensor/collect")
+        if collect_err:
+            st.error(collect_err)
+        else:
+            st.success("Reading collected")
+            refresh_page()
 
 with right:
     st.markdown("<div class='control-title'>Monitoring Dashboard</div>", unsafe_allow_html=True)
-    st.markdown("<div class='control-subtitle'>Real-time substrate conditions</div>", unsafe_allow_html=True)
+    st.markdown(
+        (
+            "<div class='control-subtitle'>Real-time substrate conditions | "
+            f"Environment: {str(runtime_mode.get('mode', 'live')).upper()}</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
     current = report.get("current") or {}
     deviation = report.get("deviation") or {}
@@ -511,7 +563,7 @@ with right:
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No live series data yet. Use Simulate Reading or Sync ESP32.")
+        st.info("No live series data yet. Use Collect Reading after selecting an environment.")
 
     bottom_left, bottom_right = st.columns([1, 1], gap="large")
 
