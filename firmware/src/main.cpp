@@ -23,14 +23,17 @@ OneWire oneWire(TEMP_SENSOR_PIN);
 DallasTemperature tempSensors(&oneWire);
 
 // Global variables
-float currentTemperature = 0.0;
-int currentMoisture = 0;
-float currentPH = 7.0;
 unsigned long lastSensorUpdate = 0;
-bool fanState = false;
-bool heaterState = false;
-bool humidifierState = false;
-bool systemAuto = true;
+unsigned long lastWiFiReconnectCheck = 0;
+
+void handlePeriodicTasks(unsigned long currentMillis) {
+  if (currentMillis - lastWiFiReconnectCheck >= WIFI_RECONNECT_INTERVAL) {
+    if (!isWiFiConnected()) {
+      reconnectWiFi();
+    }
+    lastWiFiReconnectCheck = currentMillis;
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -44,6 +47,7 @@ void setup() {
   // Initialize components
   initWiFi();
   initSensors();
+  setupActuatorPins();
   initDataLogger();
   initWebServer();
   
@@ -63,7 +67,7 @@ void loop() {
     lastSensorUpdate = currentMillis;
     
     // Run control logic in auto mode
-    if (systemAuto) {
+    if (isAutoMode()) {
       runControlLogic();
     }
     

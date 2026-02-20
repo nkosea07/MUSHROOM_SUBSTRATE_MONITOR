@@ -1,2 +1,24 @@
 # Backend Setup
-[Backend instructions]
+
+## Run locally
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp ../.env.example .env
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## MVP API endpoints
+
+- `GET /api/health`
+- `POST /api/sensor/ingest`
+- `POST /api/sensor/sync`
+- `GET /api/sensor/latest`
+- `GET /api/sensor/history`
+- `GET /api/alerts`
+- `POST /api/alerts/{id}/resolve`
+- `POST /api/control`
+- `GET /api/system/overview`

@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from sqlalchemy import select, desc, func, and_
 from datetime import datetime, timedelta
 import logging
@@ -9,22 +9,22 @@ from app.models.sensor_data import SensorData
 logger = logging.getLogger(__name__)
 
 class CRUDSensor:
-    async def create(self, db: AsyncSession, obj_in: Dict[str, Any]) -> SensorData:
+    def create(self, db: Session, obj_in: Dict[str, Any]) -> SensorData:
         db_obj = SensorData(**obj_in)
         db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
+        db.commit()
+        db.refresh(db_obj)
         return db_obj
     
-    async def get(self, db: AsyncSession, id: int) -> Optional[SensorData]:
-        result = await db.execute(
+    def get(self, db: Session, id: int) -> Optional[SensorData]:
+        result = db.execute(
             select(SensorData).where(SensorData.id == id)
         )
         return result.scalar_one_or_none()
     
-    async def get_multi(
+    def get_multi(
         self, 
-        db: AsyncSession, 
+        db: Session, 
         skip: int = 0, 
         limit: int = 100,
         start_time: Optional[datetime] = None,
@@ -38,16 +38,16 @@ class CRUDSensor:
             query = query.where(SensorData.timestamp <= end_time)
         
         query = query.offset(skip).limit(limit)
-        result = await db.execute(query)
+        result = db.execute(query)
         return result.scalars().all()
     
-    async def get_statistics(
+    def get_statistics(
         self,
-        db: AsyncSession,
+        db: Session,
         start_time: datetime,
         end_time: datetime
     ) -> Dict[str, Any]:
-        result = await db.execute(
+        result = db.execute(
             select(
                 func.count(SensorData.id).label("count"),
                 func.avg(SensorData.temperature).label("avg_temperature"),
@@ -88,18 +88,18 @@ class CRUDSensor:
             }
         }
     
-    async def get_recent(self, db: AsyncSession, hours: int = 24) -> List[SensorData]:
+    def get_recent(self, db: Session, hours: int = 24) -> List[SensorData]:
         start_time = datetime.utcnow() - timedelta(hours=hours)
-        return await self.get_multi(
+        return self.get_multi(
             db,
             start_time=start_time,
             end_time=datetime.utcnow(),
             limit=1000
         )
     
-    async def create_calibration_log(
+    def create_calibration_log(
         self,
-        db: AsyncSession,
+        db: Session,
         sensor_type: str,
         calibration_value: float,
         success: bool = True

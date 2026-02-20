@@ -54,6 +54,11 @@ body {
     font-weight: 500;
 }
 
+.status-disconnected {
+    color: #e74c3c;
+    font-weight: 500;
+}
+
 .dashboard {
     padding: 30px;
 }
@@ -207,6 +212,7 @@ body {
 .status-on { color: #2ecc71; font-weight: 600; }
 .status-off { color: #e74c3c; font-weight: 600; }
 .status-auto { color: #3498db; font-weight: 600; }
+.status-manual { color: #f39c12; font-weight: 600; }
 
 .alerts-card {
     grid-column: 1 / -1;

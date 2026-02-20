@@ -1,21 +1,21 @@
 from typing import List, Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, and_
+from sqlalchemy.orm import Session
+from sqlalchemy import select, desc
 from datetime import datetime, timedelta
 
 from app.models.alert import Alert
 
 class CRUDAlert:
-    async def create(self, db: AsyncSession, obj_in: Dict[str, Any]) -> Alert:
+    def create(self, db: Session, obj_in: Dict[str, Any]) -> Alert:
         db_obj = Alert(**obj_in)
         db.add(db_obj)
-        await db.commit()
-        await db.refresh(db_obj)
+        db.commit()
+        db.refresh(db_obj)
         return db_obj
     
-    async def get_unresolved_alerts(
+    def get_unresolved_alerts(
         self,
-        db: AsyncSession,
+        db: Session,
         severity: Optional[str] = None
     ) -> List[Alert]:
         query = select(Alert).where(Alert.resolved == False)
@@ -24,11 +24,11 @@ class CRUDAlert:
             query = query.where(Alert.severity == severity)
         
         query = query.order_by(desc(Alert.timestamp))
-        result = await db.execute(query)
+        result = db.execute(query)
         return result.scalars().all()
     
-    async def resolve_alert(self, db: AsyncSession, alert_id: int) -> Optional[Alert]:
-        result = await db.execute(
+    def resolve_alert(self, db: Session, alert_id: int) -> Optional[Alert]:
+        result = db.execute(
             select(Alert).where(Alert.id == alert_id)
         )
         alert = result.scalar_one_or_none()
@@ -36,14 +36,14 @@ class CRUDAlert:
         if alert:
             alert.resolved = True
             alert.resolved_at = datetime.utcnow()
-            await db.commit()
-            await db.refresh(alert)
+            db.commit()
+            db.refresh(alert)
         
         return alert
     
-    async def get_recent_alerts(
+    def get_recent_alerts(
         self,
-        db: AsyncSession,
+        db: Session,
         hours: int = 24,
         limit: int = 100
     ) -> List[Alert]:
@@ -52,7 +52,7 @@ class CRUDAlert:
             Alert.timestamp >= start_time
         ).order_by(desc(Alert.timestamp)).limit(limit)
         
-        result = await db.execute(query)
+        result = db.execute(query)
         return result.scalars().all()
 
 alert_crud = CRUDAlert()
