@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mushroom Monitor - ESP32 Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🍄 Mushroom Substrate Monitor</h1>
+            <div class="subtitle">ESP32 Local Dashboard</div>
+            <div class="status-bar">
+                <span id="wifi-status" class="status-connected">Connected</span>
+                <span id="last-update">Last Update: --:--:--</span>
+            </div>
+        </header>
+
+        <main class="dashboard">
+            <div class="sensor-grid">
+                <div class="card temperature-card">
+                    <h2>🌡️ Temperature</h2>
+                    <div class="value-large" id="temp-value">--.-°C</div>
+                    <div class="range">Range: <span id="temp-range">22-26°C</span></div>
+                    <div class="status" id="temp-status">--</div>
+                </div>
+
+                <div class="card moisture-card">
+                    <h2>💧 Moisture</h2>
+                    <div class="value-large" id="moisture-value">--%</div>
+                    <div class="range">Range: <span id="moisture-range">60-70%</span></div>
+                    <div class="status" id="moisture-status">--</div>
+                </div>
+
+                <div class="card ph-card">
+                    <h2>🧪 pH Level</h2>
+                    <div class="value-large" id="ph-value">-.--</div>
+                    <div class="range">Range: <span id="ph-range">6.5-7.0</span></div>
+                    <div class="status" id="ph-status">--</div>
+                </div>
+            </div>
+
+            <div class="control-section">
+                <div class="card">
+                    <h2>⚙️ Control Panel</h2>
+                    <div class="mode-selector">
+                        <button id="mode-auto" class="btn active">AUTO</button>
+                        <button id="mode-manual" class="btn">MANUAL</button>
+                    </div>
+                    
+                    <div class="actuator-controls" id="manual-controls" style="display: none;">
+                        <div class="actuator-row">
+                            <span>Fan:</span>
+                            <button id="fan-btn" class="actuator-btn off">OFF</button>
+                        </div>
+                        <div class="actuator-row">
+                            <span>Heater:</span>
+                            <button id="heater-btn" class="actuator-btn off">OFF</button>
+                        </div>
+                        <div class="actuator-row">
+                            <span>Humidifier:</span>
+                            <button id="humidifier-btn" class="actuator-btn off">OFF</button>
+                        </div>
+                    </div>
+                    
+                    <button id="refresh-btn" class="btn refresh">Refresh Data</button>
+                </div>
+
+                <div class="card">
+                    <h2>🔄 System Status</h2>
+                    <div class="status-list">
+                        <div class="status-item">
+                            <span>Fan:</span>
+                            <span id="system-fan" class="status-off">OFF</span>
+                        </div>
+                        <div class="status-item">
+                            <span>Heater:</span>
+                            <span id="system-heater" class="status-off">OFF</span>
+                        </div>
+                        <div class="status-item">
+                            <span>Humidifier:</span>
+                            <span id="system-humidifier" class="status-off">OFF</span>
+                        </div>
+                        <div class="status-item">
+                            <span>Mode:</span>
+                            <span id="system-mode" class="status-auto">AUTO</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card alerts-card">
+                <h2>⚠️ Alerts</h2>
+                <div class="alerts-list" id="alerts-list">
+                    <div class="alert info">System initialized</div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <div class="info">
+                <span>ESP32 IP: <span id="esp-ip">192.168.1.100</span></span>
+                <span>Signal: <span id="wifi-rssi">-65</span> dBm</span>
+                <span>Uptime: <span id="uptime">00:00:00</span></span>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
