@@ -4,6 +4,7 @@ class MushroomDashboard {
         this.refreshInterval = 5000; // 5 seconds
         this.refreshTimer = null;
         this.startTime = Date.now();
+        this.lastAlertTimes = new Map();
         
         this.init();
     }
@@ -35,8 +36,8 @@ class MushroomDashboard {
             
         } catch (error) {
             console.error('Error fetching data:', error);
-            this.addAlert(`Connection error: ${error.message}`, 'critical');
-            document.getElementById('wifi-status').className = 'status-critical';
+            this.addAlert(`Connection error: ${error.message}`, 'critical', 'connection-error');
+            document.getElementById('wifi-status').className = 'status-disconnected';
             document.getElementById('wifi-status').textContent = 'Disconnected';
         }
     }
@@ -82,11 +83,21 @@ class MushroomDashboard {
         document.getElementById('system-humidifier').className = 
             data.status?.humidifier === 'ON' ? 'status-on' : 'status-off';
             
-        document.getElementById('system-mode').textContent = data.status?.mode || 'AUTO';
-        document.getElementById('system-mode').className = 'status-auto';
+        const mode = data.status?.mode || 'AUTO';
+        document.getElementById('system-mode').textContent = mode;
+        document.getElementById('system-mode').className = mode === 'AUTO' ? 'status-auto' : 'status-manual';
+        document.getElementById('mode-auto').classList.toggle('active', mode === 'AUTO');
+        document.getElementById('mode-manual').classList.toggle('active', mode === 'MANUAL');
+        document.getElementById('manual-controls').style.display = mode === 'MANUAL' ? 'block' : 'none';
+        this.setActuatorButton('fan-btn', data.status?.fan === 'ON');
+        this.setActuatorButton('heater-btn', data.status?.heater === 'ON');
+        this.setActuatorButton('humidifier-btn', data.status?.humidifier === 'ON');
         
         // Update WiFi info
         if (data.wifi) {
+            const wifiConnected = Boolean(data.wifi.connected);
+            document.getElementById('wifi-status').className = wifiConnected ? 'status-connected' : 'status-disconnected';
+            document.getElementById('wifi-status').textContent = wifiConnected ? 'Connected' : 'Disconnected';
             document.getElementById('wifi-rssi').textContent = data.wifi.rssi || '-';
             document.getElementById('esp-ip').textContent = data.wifi.ip || 'Unknown';
         }
@@ -98,11 +109,11 @@ class MushroomDashboard {
         if (value < min) {
             element.textContent = 'TOO LOW';
             element.className = 'status-critical';
-            this.addAlert(`${type.charAt(0).toUpperCase() + type.slice(1)} too low: ${value}`, 'critical');
+            this.addAlert(`${type.charAt(0).toUpperCase() + type.slice(1)} too low: ${value}`, 'critical', `${type}-low`);
         } else if (value > max) {
             element.textContent = 'TOO HIGH';
             element.className = 'status-critical';
-            this.addAlert(`${type.charAt(0).toUpperCase() + type.slice(1)} too high: ${value}`, 'critical');
+            this.addAlert(`${type.charAt(0).toUpperCase() + type.slice(1)} too high: ${value}`, 'critical', `${type}-high`);
         } else if (value >= min && value <= max) {
             element.textContent = 'OPTIMAL';
             element.className = 'status-optimal';
@@ -110,6 +121,12 @@ class MushroomDashboard {
             element.textContent = 'UNKNOWN';
             element.className = '';
         }
+    }
+
+    setActuatorButton(id, isOn) {
+        const button = document.getElementById(id);
+        button.textContent = isOn ? 'ON' : 'OFF';
+        button.className = `actuator-btn ${isOn ? 'on' : 'off'}`;
     }
     
     async sendControl(command) {
@@ -133,7 +150,15 @@ class MushroomDashboard {
         }
     }
     
-    addAlert(message, type = 'info') {
+    addAlert(message, type = 'info', signature = '') {
+        const dedupeKey = signature || `${type}:${message}`;
+        const now = Date.now();
+        const lastSeen = this.lastAlertTimes.get(dedupeKey);
+        if (lastSeen && (now - lastSeen) < 60000) {
+            return;
+        }
+        this.lastAlertTimes.set(dedupeKey, now);
+
         const alertsList = document.getElementById('alerts-list');
         const alertDiv = document.createElement('div');
         alertDiv.className = `alert ${type}`;
