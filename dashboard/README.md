@@ -13,8 +13,9 @@ streamlit run app.py
 
 The dashboard supports:
 
-- Live sensor metrics
-- Manual actuator control commands
-- ESP32 sync trigger
-- Trend charts from backend history
-- Unresolved alert display
+- Left control panel for target ranges and actuator toggles
+- Live metric cards for temperature, humidity, and pH
+- Deviation detection panel (current vs target)
+- Live chart (last 20 readings)
+- Sensor readings log (last 10 readings)
+- Monitoring report summary + downloadable report payload

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import router
 from app.core import Base, engine, settings
-from app.models import ActuatorLog, Alert, SensorData  # noqa: F401
+from app.models import ActuatorLog, Alert, ControlState, SensorData, SystemSettings  # noqa: F401
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 

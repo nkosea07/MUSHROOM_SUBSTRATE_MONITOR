@@ -8,6 +8,8 @@ class ControlCommand(BaseModel):
     fan: bool | str | None = None
     heater: bool | str | None = None
     humidifier: bool | str | None = None
+    ph_actuator: bool | str | None = None
+    simulate: bool = False
 
 
 class ControlResponse(BaseModel):
