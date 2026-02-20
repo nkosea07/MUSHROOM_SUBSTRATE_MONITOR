@@ -9,4 +9,4 @@ python-dotenv==1.0.0
 streamlit-option-menu==0.3.6
 streamlit-extras==0.3.0
 streamlit-aggrid==0.3.4
-streamlit-autorefresh==0.1.7
+streamlit-autorefresh==1.0.1
