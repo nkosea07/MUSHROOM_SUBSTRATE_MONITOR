@@ -19,6 +19,51 @@ Note: pH actuator relay control is exposed in backend/dashboard, but firmware-si
 
 ## Run the full project
 
+### Prerequisites
+
+- Python 3.11+
+- PlatformIO CLI (`pio`)
+- ESP32 connected over USB (for firmware upload)
+
+### Recommended startup flow (3 terminals)
+
+Terminal 1: backend
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp ../.env.example .env
+# edit backend/.env and set ESP32_BASE_URL=http://<ESP32_IP>
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Terminal 2: dashboard
+
+```bash
+cd dashboard
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+export BACKEND_API_URL=http://localhost:8000/api
+streamlit run app.py
+```
+
+Terminal 3: firmware (optional if already flashed/running)
+
+```bash
+cd firmware
+pio run -t upload
+pio run -t uploadfs
+pio device monitor
+```
+
+Open:
+
+- Dashboard: `http://localhost:8501`
+- Backend docs: `http://localhost:8000/docs`
+
 ### 1. Firmware (ESP32)
 
 Update Wi-Fi and pins in `firmware/include/config.h`, then flash:
