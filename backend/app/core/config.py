@@ -12,6 +12,8 @@ class Settings:
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./mushroom.db")
     esp32_base_url: str = os.getenv("ESP32_BASE_URL", "http://192.168.1.100")
     esp32_timeout: int = int(os.getenv("ESP32_TIMEOUT", "10"))
+    runtime_mode_default: str = os.getenv("RUNTIME_MODE_DEFAULT", "live")
+    allow_live_fallback: bool = os.getenv("ALLOW_LIVE_FALLBACK", "false").lower() == "true"
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
     @property

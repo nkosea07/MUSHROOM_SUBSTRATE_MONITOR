@@ -3,5 +3,6 @@ from app.models.actuator_log import ActuatorLog
 from app.models.alert import Alert
 from app.models.system_settings import SystemSettings
 from app.models.control_state import ControlState
+from app.models.runtime_mode import RuntimeMode
 
-__all__ = ["SensorData", "ActuatorLog", "Alert", "SystemSettings", "ControlState"]
+__all__ = ["SensorData", "ActuatorLog", "Alert", "SystemSettings", "ControlState", "RuntimeMode"]
